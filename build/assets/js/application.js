@@ -1,0 +1,1 @@
+var BidManager={Models:{},init:function(){console.log("Hello from Backbone!")}};$(document).ready(function(){BidManager.init()});

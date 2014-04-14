@@ -1,0 +1,1 @@
+BidManager.Models.BidModel=Fulcrum.Model.extend({url:function(){return BidManager.apiRoot+"Bids/"+this.id},defaults:{name:"My Default Name",status:"Open"},validate:{name:"required"},initialize:function(){},parse:function(e){return e.Bid}});var response={Bid:{name:"My Bid Name",status:"Open"}},bid=new BidManager.Models.BidModel(response.Bid);
