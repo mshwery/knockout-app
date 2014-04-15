@@ -1,4 +1,6 @@
-var Fulcrum = (function() {
+(function(window) {
+
+  var Fulcrum = window.Fulcrum = {};
 
   var toJSON = ko.toJSON,
     utils = {
@@ -14,14 +16,18 @@ var Fulcrum = (function() {
       }
     };
 
-  var Model = function(attributes, options) {
-    var defaults;
+  Fulcrum.sync = function(method, model, options) {
+
+  };
+
+  Fulcrum.Model = function(attributes, options) {
+    var defaults = this.defaults || {};
     var attrs = attributes || {};
     options || (options = {});
     this.attributes = {};
 
     // map attrs to model, with extendable fn (in our case we want to make knockout observables)
-    _.extend(this.attributes, attrs);
+    _.extend(this.attributes, defaults, attrs);
 
     // TODO: should this be extracted from the main constructor?
     // turn attrs to observables
@@ -31,34 +37,75 @@ var Fulcrum = (function() {
     this.initialize.apply(this, arguments);
   };
 
-  _.extend(Model.prototype, {
+  _.extend(Fulcrum.Model.prototype, {
 
     // The default name for the JSON `id` attribute is `"id"`. MongoDB and
     // CouchDB users may want to set this to `"_id"`.
     idAttribute: 'id',
 
+    changed: {},
+
     initialize: function(){},
+
+    toJS: function() {
+      var attrs = {};
+
+      for (var attr in this.attributes) {
+        attrs[attr] = this.get(attr);
+      }
+
+      return attrs;
+    },
 
     toJSON: function() {
       return toJSON(this.attributes);
     },
 
-    toKO: function() {
-      var attrs = this.attributes,
-        value;
+    toKO: function(attribute, value) {
+      var attrs;
+
+      if (attribute) {
+        (attrs = {})[attribute] = value;
+      } else {
+        attrs = this.attributes;
+      }
+
       for (var attr in attrs) {
         value = attrs[attr];
-        attrs[attr] = utils.isArray(value) ?
+        this.attributes[attr] = utils.isArray(value) ?
           utils.initArray(value) :
           utils.initVar(value);
+
+        // subscribe to changes for our model's change hash
+        this.subscribe(attr);
       }
     },
 
-    sync: function() {},
+    subscribe: function(attr) {
+      this.attributes[attr].subscribe(function(newValue) {
+        this.changed[attr] = newValue;
+      }, this);
+    },
 
-    fetch: function() {},
+    sync: function() {
+      return Fulcrum.sync.apply(this, arguments);
+    },
 
-    destroy: function() {},
+    save: function(options) {
+      // bunch of stuff here
+      var type = this.isNew() ? 'POST' : 'PUT';
+      return this.sync(type, options, this);
+    },
+
+    fetch: function(options) {
+      // bunch of stuff here
+      return this.sync('GET', options, this);
+    },
+
+    destroy: function(options) {
+      // bunch of stuff here
+      return this.sync('DELETE', options, this);
+    },
 
     parse: function(response, options) {
       return response;
@@ -72,19 +119,80 @@ var Fulcrum = (function() {
       return ko.utils.unwrapObservable(this.attributes[attr]);
     },
 
-    // TODO: allow this to accept an obj of attrs
-    set: function(attr, value) {
+    // key could be a single attr or an object hash of keys and values
+    // options could potentially be used to specify 'silent' changes that don't trigger a change event or populate a changed attrs hash
+    set: function(key, val, options) {
+      var attr, attrs, prev, current, silent, unset;
+
+      // gotta have something to set
+      if (key == null) return this;
+
+      // handle both `"key", value` and `{key: value}` -style arguments.
+      if (typeof key === 'object') {
+        attrs = key;
+        options = val; // properly map the 2 args vs 3 args
+      } else {
+        // create an empty obj and simultaneously set its key name and value
+        (attrs = {})[key] = val;
+      }
+
+      options || (options = {});
+
+      // TODO: run validation?
+      // if (!this.validate(attrs, options)) return false;
+
+      // extract options
+      unset = options.unset;
+      silent = options.silent;
+
+      // setup previous & current attrs
+      prev = this._previousAttributes = this.toJS();
+      current = this.attributes;
+
+      // check for changes of `id`
+      if (this.idAttribute in attrs) this.id = attrs[this.idAttribute];
+
+      for (attr in attrs) {
+        val = attrs[attr];
+
+        // TODO: do something to detect change
+        // `Model.sync` will have to set `this.changed` back to null upon successful response
+        if (ko.utils.unwrapObservable(current[attr]) != val) {
+          this.changed[attr] = val;
+        }
+
+        unset ? delete current[attr] : this.setAttr(attr, val);
+      }
+
+      return this;
+    },
+
+    setAttr: function(attr, val) {
       var attribute = this.attributes[attr];
-      return ko.isObservable(attribute) ? attribute(value) : (this.attributes[attr] = value);
+
+      // TODO: remove KO references... need to abstract these out
+      if (attr in this.attributes) {
+        ko.isObservable(attribute) ? attribute(val) : (this.attributes[attr] = val);
+      } else {
+        this.toKO(attr, val);
+      }
+    },
+
+    previousAttributes: function() {
+      return this._previousAttributes;
     },
 
     has: function(attr) {
       return this.get(attr) != null;
-    }, 
+    },
 
     // A model is new if it has never been saved to the server, and lacks an id.
     isNew: function() {
       return !this.has(this.idAttribute);
+    },
+
+    hasChanged: function(attr) {
+      return attr ? this.changed.hasOwnProperty(attr) : !_.isEmpty(this.changed);
     }
 
   });
@@ -125,9 +233,7 @@ var Fulcrum = (function() {
     return child;
   };
 
-  Model.extend = extend;
+  Fulcrum.Model.extend = extend;
 
-  return {
-    Model: Model
-  };
-})();
+  return Fulcrum;
+})(window);
